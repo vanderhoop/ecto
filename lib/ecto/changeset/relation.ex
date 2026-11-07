@@ -630,6 +630,7 @@ defmodule Ecto.Changeset.Relation do
             # in Ecto.Changeset but we need to do it in a way where we have
             # control over the current value.
             value = not_loaded_to_empty(Map.get(struct, field))
+            if tag == :embed, do: assert_no_changeset_in_data!(value, struct, field)
             empty = empty(embed_or_assoc)
 
             case change(embed_or_assoc, value, empty) do
@@ -658,6 +659,24 @@ defmodule Ecto.Changeset.Relation do
       _ -> %{changeset | errors: errors ++ changeset.errors, valid?: false, changes: changes}
     end
   end
+
+  # A changeset stored in the data is not a change, so it must not be
+  # surfaced as one, which would also run its prepare callbacks.
+  # Structs are skipped, as their embeds are checked when surfaced.
+  defp assert_no_changeset_in_data!(value, struct, field) do
+    if changeset_in_data?(value) do
+      raise ArgumentError,
+            "embed #{inspect(field)} in #{inspect(struct.__struct__)} has a changeset in its data, " <>
+              "but changesets can only be given as changes. Use Ecto.Changeset.put_embed/4 instead"
+    end
+  end
+
+  defp changeset_in_data?(%Changeset{}), do: true
+  defp changeset_in_data?(%{__struct__: _}), do: false
+  defp changeset_in_data?(%{} = map), do: Enum.any?(map, fn {_, v} -> changeset_in_data?(v) end)
+  defp changeset_in_data?(list) when is_list(list), do: Enum.any?(list, &changeset_in_data?/1)
+  defp changeset_in_data?({_key, value}), do: changeset_in_data?(value)
+  defp changeset_in_data?(_value), do: false
 
   defp not_loaded_to_empty(%NotLoaded{__cardinality__: cardinality}),
     do: cardinality_to_empty(cardinality)
